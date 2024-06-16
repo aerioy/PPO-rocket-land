@@ -2,7 +2,7 @@
 
 {
   # https://devenv.sh/packages/
-  packages = with pkgs; [ git ];
+  packages = with pkgs; [ git gh ];
 
   languages.javascript.enable = true;
   services.postgres = {

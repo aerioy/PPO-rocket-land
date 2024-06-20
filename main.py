@@ -228,7 +228,9 @@ action defined :
 4 -> toggle engine 
 """
 
-
+def magnitude(array):
+    mag = np.sqrt(np.sum(array ** 2))
+    return mag
 
 
 

@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
-file_path = 'deepq.pth'
+
 torch.set_default_dtype(torch.float64)
 def getengineforce(ang,engineang):
     v = np.array([np.cos(ang), np.sin(ang)])
@@ -58,7 +58,7 @@ state1 = []
 
 
 """
-state vector defined :
+state 
 0 positoinx 
 1 postitiony
 2 velocityx
@@ -69,7 +69,7 @@ state vector defined :
 7 engineangle
 8 fuel
 
-action defined :
+action 
 
 1 -> do nothing
 2 -> move engine left
@@ -78,7 +78,7 @@ action defined :
 """
 
 def magnitude(array):
-    mag = np.sqrt(np.sum(array ** 2))
+    mag = np.sqrt(np.sum(array ** 2)) 
     return mag
 
 
@@ -145,8 +145,7 @@ class net(nn.Module):
         self.layer2 = nn.Linear(128, 128, dtype=torch.float64)
         self.layer3 = nn.Linear(128, n_actions, dtype=torch.float64)
 
-    # Called with either one element to determine next action, or a batch
-    # during optimization. Returns tensor([[left0exp,right0exp]...]).
+
     def forward(self, x):
         x = F.relu(self.layer1(x))
         x = F.relu(self.layer2(x))
@@ -154,7 +153,6 @@ class net(nn.Module):
 
 policynet = net(9, 4).to(device)
 targetnet = net(9, 4).to(device)
-policynet.load_state_dict(torch.load(file_path))
 targetnet.load_state_dict(policynet.state_dict())
 
 optimizer = optim.Adam(policynet.parameters(), lr=0.00001)
@@ -234,18 +232,6 @@ def gettrainingbatch(trajectory):
         
         
         
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
 def restart():
     global state
     global points
@@ -270,7 +256,6 @@ def drawtext(text, font, color, surface, x, y):
 def drawvector (v,p,color):
     pygame.draw.line(screen, color, tuple(newcoordinates(p)), tuple(newcoordinates(p+v)), 1)
     
-
 
 
 def getflamevertex (pos,ang,engineangle ):
@@ -459,7 +444,7 @@ while trials <= 1000:
 
 
 # Save the model parameters
-torch.save(policynet.state_dict(), file_path)
+#torch.save(policynet.state_dict(), file_path)
 
 #policynet.load_state_dict(torch.load(file_path))
 

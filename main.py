@@ -29,13 +29,14 @@ def rotate90 (v):
 def getvertex(pos, ang):
     v = np.array([np.cos(ang), np.sin(ang)])
     w = rotate90(v)
-    return [
-        newcoordinates(pos + v * 70),
-        newcoordinates(pos + (50 * v + 10 * w)),
-        newcoordinates(pos + (-50 * v + 10 * w)),
-        newcoordinates(pos + (-50 * v + (-10) * w)),
-        newcoordinates(pos + (50 * v + (-10)  *w))
-    ]
+    out = []
+    for t in range (-10,10):
+        out.append(newcoordinates(pos + v * 70 + (0.2) * (-1 * v) * t**2 + w * t))
+    out.append(newcoordinates(pos + (50 * v + 10 * w)))
+    out.append(newcoordinates(pos + (-50 * v + 10 * w)))
+    out.append(newcoordinates(pos + (-50 * v + (-10) * w)))
+    out.append(newcoordinates(pos + (50 * v + (-10)  *w)))
+    return out
     
 def randrange (a,b):
     return a + (b-a) * random()
@@ -386,13 +387,15 @@ while trials <= 1000:
     optimizer.step
     if trials % 50 == 0:
         targetnet.load_state_dict(policynet.state_dict())
-    if trials % 200 == 0:
+    if trials % 1 == 0:
         points = [np.array([500,1000])]
         visual = []
         print(trialpath)
         for x in trialpath:
             visual.append(x[0])
-        for state in visual:
+        state = visual[0]
+        while True:
+        # for state in visual:
             position = np.array([state[0],state[1]])
             velocity = np.array([state[2],state[3]])
             angle = state[4]
@@ -407,7 +410,8 @@ while trials <= 1000:
                     sys.exit()
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
-                        restart()        
+                        points = [np.array([500,1000])]
+                        state =  np.array([xdim/3.0,900.0,0.0,0.0, np.float64(randrange(np.pi/4,np.pi/2)),0.0,0.0,np.pi/2,20.0])       
                     if event.key == pygame.K_f:
                         a = 4
                     if event.key == pygame.K_LEFT:
@@ -419,11 +423,12 @@ while trials <= 1000:
                             pause = False
                         else:
                             pause = True
-            #    if not pause:
-            #      state = transition(state,a)
-            #    for x in getvertex(position,angle):
-            #     if x[1] >= 900 or x[0] <= 0 or x[0] >= xdim:
-            #         restart()
+            if not pause:
+                state = transition(state,a)
+            for x in getvertex(position,angle):
+                if x[1] >= 900 or x[0] <= 0 or x[0] >= xdim:
+                    points = [np.array([500,1000])]
+                    state =  np.array([xdim/3.0,900.0,0.0,0.0, np.float64(randrange(np.pi/4,np.pi/2)),0.0,0.0,np.pi/2,20.0])
             drawvector(velocity,np.array([xdim + 150,500]),(255,0,0))
             drawvector(gravity,np.array([xdim + 150,500]),(255,0,0))
             printpath(points)

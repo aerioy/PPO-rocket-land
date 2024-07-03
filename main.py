@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+from torch.distributions.categorical import Categorical
 
 
 torch.set_default_dtype(torch.float64)
@@ -84,21 +85,48 @@ def magnitude(array):
 
 
 
-def reward (state):
-    positionx = state[0]
-    positiony = state[1]
-    position = np.array([positionx,positiony])
-    angle = state[4]
-    for x in getvertex(np.array([positionx,positiony]),angle):
-     if x[1] >= 900 or x[0] <= 0 or x[0] >= xdim:
-         return 0
-    velocityx = state[2]
-    velocityy = state[3]
-    anglevelocity = state[5]
-    fuel = state[8]
-    out = (-1 * magnitude(position - np.array([xdim/2,100]))) ** 2 + fuel + (-1 * abs(velocityy)) ** 9  + 1/3 * (-1 * abs(velocityx)) + (-1 * abs(angle - np.pi/2)) ** 5
-    return out
+# def reward (state):
+#     positionx = state[0]
+#     positiony = state[1]
+#     position = np.array([positionx,positiony])
+#     angle = state[4]
+#     for x in getvertex(np.array([positionx,positiony]),angle):
+#      if x[1] >= 900 or x[0] <= 0 or x[0] >= xdim:
+#          return 0
+#     velocityx = state[2]
+#     velocityy = state[3]
+#     anglevelocity = state[5]
+#     fuel = state[8]
+#     # out = -1 * abs(velocityy)
+#     out = (-1 * magnitude(position - np.array([xdim/2,100]))) ** 2 + fuel + (-1 * abs(velocityy)) ** 9  + 1/3 * (-1 * abs(velocityx)) + (-1 * abs(angle - np.pi/2)) ** 5
+#     return out
 
+
+def is_terminal(state):
+    terminal = False
+    for x in getvertex(np.array([state[0],state[1]]),state[4]):
+        if x[1] >= 900:
+            terminal = True
+    return terminal
+
+def reward(state):
+    position = np.array([state[0], state[1]])
+    target = np.array([xdim/2, 100])
+    distance = np.linalg.norm(position - target)
+    velocity = np.array([state[2], state[3]])
+    speed = np.linalg.norm(velocity)
+    
+    reward = -distance / 1000  # Encourage getting closer to the target
+    reward -= speed / 10  # Penalize high speeds
+    reward += state[8] / 20  # Small bonus for conserving fuel
+    
+    if is_terminal(state):
+        if position[1] <= 110 and abs(position[0] - xdim/2) < 100:
+            reward += 100  # Big bonus for landing on the pad
+        else:
+            reward -= 100  # Big penalty for crashing
+    
+    return -1 * speed
 
 def transition (state,action):
     angle = state[4]
@@ -137,49 +165,175 @@ def transition (state,action):
         
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(device)
 
-class net(nn.Module):
+class memory:
+    def __init__ (self):
+        self.length = 0
+        self.states = []
+        self.actions = []
+        self.probabilities = []
+        self.values = []
+        self.rewards = []
+        self.terminate = []
+    
+    def generatebatches(self):
+        startindexes = np.arange(0,self.length,10)
+        indexes = (np.arange(self.length,dtype=np.int64))
+        np.random.shuffle(indexes)
+        batches = [indexes[i:i + 10] for i in startindexes]
+
+        return np.array(self.states), np.array(self.actions),\
+               np.array(self.probabilities), np.array(self.values),\
+               np.array(self.rewards), np.array(self.terminate), batches 
  
-    def __init__(self, n_observations, n_actions):
-        super(net, self).__init__()
-        self.layer1 = nn.Linear(n_observations, 128, dtype=torch.float64)
-        self.layer2 = nn.Linear(128, 128, dtype=torch.float64)
-        self.layer3 = nn.Linear(128, n_actions, dtype=torch.float64)
+    def store (self,state,action,probability,value,reward,terminate):
+        self.length += 1
+        self.states.append(state)
+        self.actions.append(action)
+        self.probabilities.append(probability)
+        self.values.append(value)
+        self.rewards.append(reward)
+        self.terminate.append(terminate)
+    
+    def clear(self):
+        self.length = 0
+        self.states = []
+        self.actions = []
+        self.probabilities = []
+        self.values = []
+        self.rewards = []
+        self.terminate = []
 
 
-    def forward(self, x):
-        x = F.relu(self.layer1(x))
-        x = F.relu(self.layer2(x))
-        return self.layer3(x)
 
-policynet = net(9, 4).to(device)
-targetnet = net(9, 4).to(device)
-targetnet.load_state_dict(policynet.state_dict())
+class network(nn.Module):
+    def __init__(self,layers,lrate,is_distribution = False):
+      super(network, self).__init__()
+      self.distribution = is_distribution
+      self.network = self.constructnet(layers)
+      self.optimizer = optim.Adam(self.parameters(),lr = lrate)
 
-optimizer = optim.Adam(policynet.parameters(), lr=0.00001)
-lf = nn.MSELoss()
+    
+    def constructnet (self,layers):
+      arcitecture = []
+      for x in range(len(layers) - 1):
+        arcitecture.append(nn.Linear(layers[x],layers[x+1]))
+        if x != len(layers) - 2:
+         arcitecture.append(nn.ReLU())
+      if self.distribution:
+        arcitecture.append(nn.Softmax(dim = -1))
+      return nn.Sequential(*arcitecture)
 
-def epsilon (steps_done):
-    if steps_done < 200:
-        return 0.4
-    if steps_done < 400:
-        return 0.2
-    if steps_done < 600:
-        return 0.1
-    if steps_done < 800:
-        return 0.01
-    return 0
+    def forward (self,x):
+        if self.distribution:
+            distribution = self.network(x)
+            distribution = Categorical(distribution)
+            return distribution
+        return self.network(x)
+     
+    def saveparameters (self,filepath):
+        torch.save(self.state_dict(),filepath)
+    
+    def loadparameters (self,filepath):
+        self.load_state_dict(torch.load(filepath))
 
-trials = 0
-discount = 0.99
 
-def randgreedy(state, steps_done):
-    n = random()
-    e = epsilon(steps_done)
-    if n < (1 - e):
-        with torch.no_grad():
-            return maxindex(policynet(torch.tensor(state)))
-    return np.random.choice(np.array([1.0,2.0,3.0,4.0]))
+class agent:
+    def __init__ (self):
+        self.policynet = network([9,256,256,4],0.00031,is_distribution = True)
+        self.valuenet = network([9,256,256,1],0.00031,)
+        self.memory = memory()
+
+    def storememory(self,state,action,probability,value,reward,terminate):
+        self.memory.store(state,action,probability,value,reward,terminate)
+
+    def saveparameters (self,policyfile,valuefile):
+        self.policynet.saveparameters(policyfile)
+        self.valuenet.saveparameters(valuefile)
+    
+    def loadparameters(self,policyfile,valuefile):
+        self.policynet.load(policyfile)
+        self.valuenet.load(valuefile)
+
+    def getaction(self,inputstate):
+        state = torch.tensor(np.array([inputstate]))
+        distribution = self.policynet(state)
+        value = self.valuenet(state)
+        action = distribution.sample()
+
+        return torch.squeeze(action).item(),\
+               torch.squeeze(distribution.log_prob(action)).item(),\
+               torch.squeeze(value).item()
+
+
+    def train(self):
+        for _ in range(10):
+            states, actions, probabilities,values,rewards,terminates, batches = \
+            self.memory.generatebatches()
+            advantages = np.zeros(len(rewards))
+            for i in range(len(rewards) - 1):
+                a = 0
+                temp = 1
+                for j in range (i,len(rewards) - 1):
+                    a += temp * (rewards[j] + 0.95 * values[j+1] * (1-int(terminates[j])) - values[j])
+                    temp *= 0.95
+                advantages[i] = a
+            advantages = torch.tensor(advantages)
+            values = torch.tensor(values)
+            for batch in batches:
+                batchstates = torch.tensor(states[batch])
+                batchprobabilities = torch.tensor(probabilities[batch])
+                batchactions = torch.tensor(actions[batch])
+                distribution = self.policynet(batchstates)
+                networkvalues = torch.squeeze(self.valuenet(batchstates))
+                newprobabilities = distribution.log_prob(batchactions)
+                ratio = ((newprobabilities - batchprobabilities).exp())
+                advantageratio = ratio * advantages[batch]
+                clippedratio = torch.clamp(ratio,0.9,1.1) * advantages[batch]
+                policyloss = -1 * torch.min(advantageratio,clippedratio).mean()
+                valueloss = ((advantages[batch] + values[batch] - networkvalues) ** 2).mean()
+                loss = policyloss + 0.5 * valueloss
+                self.policynet.optimizer.zero_grad()
+                self.valuenet.optimizer.zero_grad() 
+                loss.backward()
+                self.policynet.optimizer.step()
+                self.valuenet.optimizer.step()
+        self.memory.clear()
+            
+
+
+
+
+
+ 
+
+
+
+
+
+
+        
+        
+
+
+                 
+            
+
+
+        
+
+        
+
+        
+
+
+
+
+
+
+
+
 
 def maxindex (tensor):
     max = tensor[0]
@@ -190,7 +344,7 @@ def maxindex (tensor):
             maxindex = x
     return maxindex
 
-
+trials = 0
 def trajectory(initialstate,maxlength):
     global trials
     trials += 1 
@@ -365,76 +519,98 @@ clock = pygame.time.Clock()
 
 
 
-
-
-restart()
-
-
-            
-while trials <= 1000:
-    print("TRIAL NUMBER : " + str(trials))
-    trialpath= trajectory(np.array([xdim/3.0,900.0,0.0,0.0, randrange(np.pi/4,np.pi/2),0.0,0.0,np.pi/2,20.0]),1000)
-    batch = gettrainingbatch(trialpath)
-    states = batch[0]
-    actions = batch[1]
-    y = batch[2]
-    loss = 0
-    optimizer.zero_grad()
-    for j in range (len(batch[0])):
-        loss +=  lf(y[j],policynet(states[j])[int(actions[j] - 1)]) 
-    avgloss = loss / len(batch[0])
-    avgloss.backward()
-    optimizer.step
-    if trials % 50 == 0:
-        targetnet.load_state_dict(policynet.state_dict())
-    if trials % 1 == 0:
-        points = [np.array([500,1000])]
-        visual = []
-        print(trialpath)
-        for x in trialpath:
-            visual.append(x[0])
-        state = visual[0]
-        while True:
-        # for state in visual:
+def testrun (pilot):
+    points = [np.array([xdim/2.5,900])]
+    state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
+    while True:
             position = np.array([state[0],state[1]])
             velocity = np.array([state[2],state[3]])
             angle = state[4]
             engineangle = state[7]
             engine = state[6]
             points.append(np.array([state[0],state[1]]))
-            a = 0
+            a = pilot.getaction(state)[0] + 1
             printstate(state)
-            for event in pygame.event.get():
-                if event.type == QUIT:
-                    pygame.quit()
-                    sys.exit()
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        points = [np.array([500,1000])]
-                        state =  np.array([xdim/3.0,900.0,0.0,0.0, np.float64(randrange(np.pi/4,np.pi/2)),0.0,0.0,np.pi/2,20.0])       
-                    if event.key == pygame.K_f:
-                        a = 4
-                    if event.key == pygame.K_LEFT:
-                        a = 2
-                    if event.key == pygame.K_RIGHT:
-                        a = 3
-                    if event.key == pygame.K_SPACE:
-                        if pause:
-                            pause = False
-                        else:
-                            pause = True
-            if not pause:
-                state = transition(state,a)
+            state = transition(state,a)
             for x in getvertex(position,angle):
-                if x[1] >= 900 or x[0] <= 0 or x[0] >= xdim:
-                    points = [np.array([500,1000])]
-                    state =  np.array([xdim/3.0,900.0,0.0,0.0, np.float64(randrange(np.pi/4,np.pi/2)),0.0,0.0,np.pi/2,20.0])
+                if x[1] >= 900:
+                    return
             drawvector(velocity,np.array([xdim + 150,500]),(255,0,0))
             drawvector(gravity,np.array([xdim + 150,500]),(255,0,0))
             printpath(points)
             printpath(extrapolate(state,300),(255,0,0))
             pygame.display.update()
             clock.tick(60)
+            
+
+
+restart()
+
+pilot = agent()
+
+steps = 0        
+while True:
+    state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
+    terminal = False  
+    print(trials)
+    if trials % 50 == 0:
+        testrun(pilot) 
+    while not terminal:
+     steps += 1
+     action,prob,val = pilot.getaction(state)
+     nextstate = transition(state,action + 1)
+     reward_ = reward(nextstate)
+     for x in getvertex(np.array([state[0],state[1]]),state[4]):
+        if x[1] >= 900 or x[1] <= 0 or x[0] <= 0 or x[0] >= xdim:
+            print("terminated")
+            terminal = True
+     pilot.storememory(state,action,prob,val,reward_,terminal)
+     if steps % 20 == 0:
+        print("training loop start")
+        pilot.train()
+     state = nextstate
+    trials += 1
+    while False:
+    # for state in visual:
+        position = np.array([state[0],state[1]])
+        velocity = np.array([state[2],state[3]])
+        angle = state[4]
+        engineangle = state[7]
+        engine = state[6]
+        points.append(np.array([state[0],state[1]]))
+        a = 0
+        printstate(state)
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    points = [np.array([xdim/2.5,900])]
+                    state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0])       
+                if event.key == pygame.K_f:
+                    a = 4
+                if event.key == pygame.K_LEFT:
+                    a = 2
+                if event.key == pygame.K_RIGHT:
+                    a = 3
+                if event.key == pygame.K_SPACE:
+                    if pause:
+                        pause = False
+                    else:
+                        pause = True
+        if not pause:
+            state = transition(state,a)
+        for x in getvertex(position,angle):
+            if x[1] >= 900:
+                points = [np.array([xdim/2.5,900])]
+                state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0])
+        drawvector(velocity,np.array([xdim + 150,500]),(255,0,0))
+        drawvector(gravity,np.array([xdim + 150,500]),(255,0,0))
+        printpath(points)
+        printpath(extrapolate(state,300),(255,0,0))
+        pygame.display.update()
+        clock.tick(60)
             
 
 

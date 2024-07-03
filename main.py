@@ -126,7 +126,7 @@ def reward(state):
         else:
             reward -= 100  # Big penalty for crashing
     
-    return -1 * speed
+    return reward
 
 def transition (state,action):
     angle = state[4]

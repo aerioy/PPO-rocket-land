@@ -241,8 +241,8 @@ class network(nn.Module):
 
 class agent:
     def __init__ (self):
-        self.policynet = network([9,256,256,4],0.00031,is_distribution = True)
-        self.valuenet = network([9,256,256,1],0.00031,)
+        self.policynet = network([9,2,2,4],0.005,is_distribution = True)
+        self.valuenet = network([9,32,32,1],0.005,)
         self.memory = memory()
 
     def storememory(self,state,action,probability,value,reward,terminate):
@@ -266,55 +266,8 @@ class agent:
                torch.squeeze(distribution.log_prob(action)).item(),\
                torch.squeeze(value).item()
 
-
     def train(self):
-        for _ in range(10):
-            states, actions, probabilities,values,rewards,terminates, batches = \
-            self.memory.generatebatches()
-            advantages = np.zeros(len(rewards))
-            for i in range(len(rewards) - 1):
-                a = 0
-                temp = 1
-                for j in range (i,len(rewards) - 1):
-                    a += temp * (rewards[j] + 0.95 * values[j+1] * (1-int(terminates[j])) - values[j])
-                    temp *= 0.95
-                advantages[i] = a
-            advantages = torch.tensor(advantages)
-            values = torch.tensor(values)
-            for batch in batches:
-                batchstates = torch.tensor(states[batch])
-                batchprobabilities = torch.tensor(probabilities[batch])
-                batchactions = torch.tensor(actions[batch])
-                distribution = self.policynet(batchstates)
-                networkvalues = torch.squeeze(self.valuenet(batchstates))
-                newprobabilities = distribution.log_prob(batchactions)
-                ratio = ((newprobabilities - batchprobabilities).exp())
-                advantageratio = ratio * advantages[batch]
-                clippedratio = torch.clamp(ratio,0.9,1.1) * advantages[batch]
-                policyloss = -1 * torch.min(advantageratio,clippedratio).mean()
-                valueloss = ((advantages[batch] + values[batch] - networkvalues) ** 2).mean()
-                loss = policyloss + 0.5 * valueloss
-                self.policynet.optimizer.zero_grad()
-                self.valuenet.optimizer.zero_grad() 
-                loss.backward()
-                self.policynet.optimizer.step()
-                self.valuenet.optimizer.step()
-        self.memory.clear()
-            
-
-
-
-
-
- 
-
-
-
-
-
-
-        
-        
+        pass
 
 
                  
@@ -470,7 +423,6 @@ def extrapolate (state,n):
         return [np.array([transition(state,0)[0],transition(state,0)[1]])]
     else:
         return combine([np.array([transition(state,0)[0],transition(state,0)[1]])],extrapolate(transition(state,0),n-1))
-    
 
 def max_action_n_steps(state,n):
   q = 1.4
@@ -495,20 +447,19 @@ def max_action_n_steps(state,n):
         a = action
     return a
 
-
 def printstate(state):
    position = np.array([state[0],state[1]])
    velocity = np.array([state[2],state[3]])
    angle = state[4]
    engineangle = state[7]
    engine = state[6]
-   pygame.draw.rect(screen,(0,100,255),backdrop)
-   pygame.draw.rect(screen,(0,255,0),ground)
+   pygame.draw.rect(screen,(57,54,138),backdrop)
+   pygame.draw.rect(screen,(204,102,0),ground)
    pygame.draw.polygon(screen, (0,0,0),help(getvertex(position, angle)))
-   pygame.draw.polygon(screen,(150,150,150),help(getflamevertex(position,angle,engineangle)))
-   pygame.draw.polygon(screen, (255,255,255),help(getvertex(np.array([xdim + 150,500]), angle)))
-   pygame.draw.polygon(screen,(150,150,150),help(getflamevertex(np.array([xdim + 150,500]),angle,engineangle)))
-   pygame.draw.rect(screen,(77,77,77),landingpad)
+   pygame.draw.polygon(screen,(100,100,100),help(getflamevertex(position,angle,engineangle)))
+   pygame.draw.polygon(screen, (131,131,131),help(getvertex(np.array([xdim + 150,500]), angle)))
+   pygame.draw.polygon(screen,(77,77,77),help(getflamevertex(np.array([xdim + 150,500]),angle,engineangle)))
+   pygame.draw.rect(screen,(90,77,77),landingpad)
    if engine == 1:
        pygame.draw.polygon(screen,(255,100,0),help(getfirevertex(position,angle,engineangle)))
        pygame.draw.polygon(screen,(255,100,0),help(getfirevertex(np.array([xdim + 150,500]),angle,engineangle)))
@@ -537,8 +488,8 @@ def testrun (pilot):
                     return
             drawvector(velocity,np.array([xdim + 150,500]),(255,0,0))
             drawvector(gravity,np.array([xdim + 150,500]),(255,0,0))
-            printpath(points)
-            printpath(extrapolate(state,300),(255,0,0))
+            printpath(points,(255,255,255))
+            printpath(extrapolate(state,300),(254,2,25))
             pygame.display.update()
             clock.tick(60)
             
@@ -547,30 +498,11 @@ def testrun (pilot):
 restart()
 
 pilot = agent()
-
-steps = 0        
+    
 while True:
-    state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
-    terminal = False  
-    print(trials)
-    if trials % 50 == 0:
-        testrun(pilot) 
-    while not terminal:
-     steps += 1
-     action,prob,val = pilot.getaction(state)
-     nextstate = transition(state,action + 1)
-     reward_ = reward(nextstate)
-     for x in getvertex(np.array([state[0],state[1]]),state[4]):
-        if x[1] >= 900 or x[1] <= 0 or x[0] <= 0 or x[0] >= xdim:
-            print("terminated")
-            terminal = True
-     pilot.storememory(state,action,prob,val,reward_,terminal)
-     if steps % 20 == 0:
-        print("training loop start")
-        pilot.train()
-     state = nextstate
-    trials += 1
-    while False:
+    state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0])       
+
+    while True :
     # for state in visual:
         position = np.array([state[0],state[1]])
         velocity = np.array([state[2],state[3]])
@@ -607,8 +539,8 @@ while True:
                 state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0])
         drawvector(velocity,np.array([xdim + 150,500]),(255,0,0))
         drawvector(gravity,np.array([xdim + 150,500]),(255,0,0))
-        printpath(points)
-        printpath(extrapolate(state,300),(255,0,0))
+        printpath(points,(150,150,150))
+        printpath(extrapolate(state,300),(254,2,25))
         pygame.display.update()
         clock.tick(60)
             

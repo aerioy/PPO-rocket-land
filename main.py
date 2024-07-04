@@ -95,7 +95,7 @@ def reward(state):
     speed = np.linalg.norm(velocity)
     angleoffset = abs(np.pi/2 - state[4])**2
     
-    reward = -distance / 1000  # Encourage getting closer to the target
+    reward = -distance / 300  # Encourage getting closer to the target
     reward -= speed / 10  # Penalize high speeds
     reward += state[8] / 20  # Small bonus for conserving fuel
     reward -= angleoffset
@@ -222,8 +222,8 @@ class network(nn.Module):
 
 class agent:
     def __init__ (self):
-        self.policynet = network([9,2,2,4],0.005,is_distribution = True)
-        self.valuenet = network([9,32,32,1],0.005,)
+        self.policynet = network([9,128,128,4],0.0005,is_distribution = True)
+        self.valuenet = network([9,128,128,1],0.0005,)
         self.memory = memory()
 
     def storememory(self,state,action,probability,value,reward,terminate):
@@ -455,7 +455,7 @@ def testrun (pilot):
             printstate(state)
             state = transition(state,a)
             for x in getvertex(position,angle):
-                if x[1] >= 900:
+                if x[1] >= 900 or x[1] <= 0 or x[0] >= xdim or x[0] <= 0:
                     print("testrun was terminated")
                     return
             drawvector(velocity,np.array([xdim + 150,500]),(255,0,0))
@@ -471,9 +471,9 @@ restart()
 
 pilot = agent()
 
-     
-
-for n in range(1000):
+n = 0    
+While True:
+    n += 1
     print("trial number : " + str(n))
     if n % 10 == 0 :
         testrun(pilot)
@@ -486,6 +486,7 @@ for n in range(1000):
         for x in getvertex(np.array([state[0],state[1]]),state[4]):
             if x[1] >= 900 or x[1] <= 0 or x[0] >= xdim or x[0] <= 0:
                 done = True
+                break
         pilot.storememory(state,action,prob,val,reward_,done)
         state = nextstate
     print("traning loop started")

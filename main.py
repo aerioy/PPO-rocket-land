@@ -95,14 +95,14 @@ def reward(state):
     speed = np.linalg.norm(velocity)
     angleoffset = abs(np.pi/2 - state[4])**2
     
-    reward = -distance / 300  # Encourage getting closer to the target
+    reward = -distance / 900  # Encourage getting closer to the target
     reward -= speed / 10  # Penalize high speeds
     reward += state[8] / 20  # Small bonus for conserving fuel
     reward -= angleoffset
     
     if is_terminal(state):
-        if position[1] <= 110 and abs(position[0] - xdim/2) < 100:
-            reward += 100  # Big bonus for landing on the pad
+        if position[1] <= 110 and abs(position[0] - xdim/2) < 300:
+            reward += 100 -  5 * speed  # Big bonus for landing on the pad
         else:
             reward -= 100  # Big penalty for crashing
     
@@ -143,6 +143,13 @@ def transition (state,action):
         
 def g(x, y):
     return torch.where(y >= 0, (1+x) * y, (1-x) * y)
+
+def init_weights(m):
+    if type(m) == nn.Linear:
+        torch.nn.init.xavier_uniform_(m.weight, gain=0.01)
+        m.bias.data.fill_(0.01)
+
+
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
@@ -224,6 +231,7 @@ class agent:
     def __init__ (self):
         self.policynet = network([9,128,128,4],0.0005,is_distribution = True)
         self.valuenet = network([9,128,128,1],0.0005,)
+        self.policynet.apply(init_weights)
         self.memory = memory()
 
     def storememory(self,state,action,probability,value,reward,terminate):
@@ -284,7 +292,7 @@ class agent:
             distribution = self.policynet(states) 
             newprobs = distribution.log_prob(actions)
             ratio = (newprobs - oldprobs).exp()
-            PPOLoss = torch.min(advantages * ratio, g(epsilon,advantages)).mean()
+            PPOLoss = -1 * torch.min(advantages * ratio, g(epsilon,advantages)).mean()
             PPOLoss.backward()
             self.policynet.optimizer.step()
 
@@ -442,9 +450,13 @@ clock = pygame.time.Clock()
 
 
 def testrun (pilot):
-    points = [np.array([xdim/2.5,900])]
-    state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
+    points = [np.array([xdim/2.5,700])]
+    state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
     while True:
+            for event in pygame.event.get():
+                if event.type == QUIT:
+                    pygame.quit()
+                    sys.exit()
             position = np.array([state[0],state[1]])
             velocity = np.array([state[2],state[3]])
             angle = state[4]
@@ -473,11 +485,11 @@ pilot = agent()
 
 n = 0    
 while True:
-    n += 1
     print("trial number : " + str(n))
     if n % 10 == 0 :
         testrun(pilot)
-    state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
+    n += 1
+    state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
     done = False
     while not done:
         action,prob,val = pilot.getaction(state)
@@ -489,7 +501,6 @@ while True:
                 break
         pilot.storememory(state,action,prob,val,reward_,done)
         state = nextstate
-    print("traning loop started")
     pilot.train(10)
 
 

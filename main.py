@@ -79,29 +79,6 @@ action
 4 -> toggle engine 
 """
 
-def magnitude(array):
-    mag = np.sqrt(np.sum(array ** 2)) 
-    return mag
-
-
-
-# def reward (state):
-#     positionx = state[0]
-#     positiony = state[1]
-#     position = np.array([positionx,positiony])
-#     angle = state[4]
-#     for x in getvertex(np.array([positionx,positiony]),angle):
-#      if x[1] >= 900 or x[0] <= 0 or x[0] >= xdim:
-#          return 0
-#     velocityx = state[2]
-#     velocityy = state[3]
-#     anglevelocity = state[5]
-#     fuel = state[8]
-#     # out = -1 * abs(velocityy)
-#     out = (-1 * magnitude(position - np.array([xdim/2,100]))) ** 2 + fuel + (-1 * abs(velocityy)) ** 9  + 1/3 * (-1 * abs(velocityx)) + (-1 * abs(angle - np.pi/2)) ** 5
-#     return out
-
-
 def is_terminal(state):
     terminal = False
     for x in getvertex(np.array([state[0],state[1]]),state[4]):
@@ -109,16 +86,19 @@ def is_terminal(state):
             terminal = True
     return terminal
 
+
 def reward(state):
     position = np.array([state[0], state[1]])
     target = np.array([xdim/2, 100])
     distance = np.linalg.norm(position - target)
     velocity = np.array([state[2], state[3]])
     speed = np.linalg.norm(velocity)
+    angleoffset = abs(np.pi/2 - state[4])**2
     
     reward = -distance / 1000  # Encourage getting closer to the target
     reward -= speed / 10  # Penalize high speeds
     reward += state[8] / 20  # Small bonus for conserving fuel
+    reward -= angleoffset
     
     if is_terminal(state):
         if position[1] <= 110 and abs(position[0] - xdim/2) < 100:
@@ -161,8 +141,8 @@ def transition (state,action):
     return (nextstate)
 
         
-        
-        
+def g(x, y):
+    return torch.where(y >= 0, (1+x) * y, (1-x) * y)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
@@ -186,6 +166,7 @@ class memory:
         return np.array(self.states), np.array(self.actions),\
                np.array(self.probabilities), np.array(self.values),\
                np.array(self.rewards), np.array(self.terminate), batches 
+        
  
     def store (self,state,action,probability,value,reward,terminate):
         self.length += 1
@@ -266,24 +247,56 @@ class agent:
                torch.squeeze(distribution.log_prob(action)).item(),\
                torch.squeeze(value).item()
 
-    def train(self):
-        pass
+    def train(self,iterations,epsilon = 0.2,discount = 0.95):
+        states_,actions_,probs_,vals_,rewards_,terminate_,batches_ = self.memory.generatebatches()
+        advantages_ = np.zeros(len(states_))
+        rewards_to_go_ = np.zeros(len(states_))
 
+        # calculate rewards to go
+        for T in range (len(rewards_to_go_)):
+            discount_ = 1
+            R = 0
+            for t in range (T,len(rewards_to_go_)):
+                R += discount_ * rewards_[t]
+                discount_ = discount_ * discount
+            rewards_to_go_[T] = R
 
-                 
-            
-
+        # calculate estimate for advantage functoin
+        for T in range (len(advantages_) - 1):
+            discount_ = 1
+            A = 0
+            for t in range(T,len(advantages_ ) - 1):
+                A+= discount_ * (rewards_[t] + discount * vals_[t+1] - vals_[t])
+                discount_ = discount_ * discount
+            advantages_[T] = A
 
         
+        states = torch.tensor(states_)
+        oldprobs = torch.tensor(probs_)
+        actions = torch.tensor(actions_)
+        rewards_to_go = torch.tensor(rewards_to_go_)
+        advantages = torch.tensor(advantages_)
 
+
+        # training on policy
+        for _ in range (iterations):
+            self.policynet.optimizer.zero_grad()
+            distribution = self.policynet(states) 
+            newprobs = distribution.log_prob(actions)
+            ratio = (newprobs - oldprobs).exp()
+            PPOLoss = torch.min(advantages * ratio, g(epsilon,advantages)).mean()
+            PPOLoss.backward()
+            self.policynet.optimizer.step()
+
+        # trainig on value estimator
+        for _ in range (iterations):
+            self.valuenet.optimizer.zero_grad()
+            networkvalues = self.valuenet(states)
+            valueloss = ((networkvalues - rewards_to_go) **2).mean()
+            valueloss.backward()
+            self.valuenet.optimizer.step()
         
-
-        
-
-
-
-
-
+        self.memory.clear()
 
 
 
@@ -297,49 +310,7 @@ def maxindex (tensor):
             maxindex = x
     return maxindex
 
-trials = 0
-def trajectory(initialstate,maxlength):
-    global trials
-    trials += 1 
-    state = initialstate
-    out = []
-    for x in range(maxlength):
-        for w in (getvertex(np.array([state[0],state[1]]),state[4])):   
-           if w[0] <= 0 or w[0] >= xdim or w[1] >= 900 or w[1] <= 0:
-              return out
-        action = randgreedy(state, trials)
-        nextstate = transition(state,action)
-        value = reward(nextstate)
-        out.append((state,action,value,nextstate))
-        state = nextstate
-    return out
-      
-# (state, action, reward, nextstate)
-def gettrainingbatch(trajectory):
-    if len(trajectory) < 128:
-        minibatch = trajectory
-        statetensor = []
-        actiontensor = []
-        ytensor = torch.zeros(len(trajectory))
-        
-    else:   
-        indices = np.random.choice(len(trajectory), size=128, replace=False)
-        minibatch = list(map(lambda x : trajectory[x],indices))
-        statetensor = []
-        actiontensor = []
-        ytensor = torch.zeros(128)
-    for x in range(len(minibatch)):
-        with torch.no_grad():
-            v = targetnet.forward(torch.tensor(minibatch[x][3])).max()
-        ytensor[x] = minibatch[x][2] + discount * v
-        statetensor.append(minibatch[x][0])
-        actiontensor.append(minibatch[x][1])
-    return (torch.tensor(np.array(statetensor)),torch.tensor(np.array(actiontensor)),ytensor)    
-        
-        
-        
-        
-        
+
 def restart():
     global state
     global points
@@ -485,6 +456,7 @@ def testrun (pilot):
             state = transition(state,a)
             for x in getvertex(position,angle):
                 if x[1] >= 900:
+                    print("testrun was terminated")
                     return
             drawvector(velocity,np.array([xdim + 150,500]),(255,0,0))
             drawvector(gravity,np.array([xdim + 150,500]),(255,0,0))
@@ -498,51 +470,70 @@ def testrun (pilot):
 restart()
 
 pilot = agent()
-    
-while True:
-    state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0])       
 
-    while True :
-    # for state in visual:
-        position = np.array([state[0],state[1]])
-        velocity = np.array([state[2],state[3]])
-        angle = state[4]
-        engineangle = state[7]
-        engine = state[6]
-        points.append(np.array([state[0],state[1]]))
-        a = 0
-        printstate(state)
-        for event in pygame.event.get():
-            if event.type == QUIT:
-                pygame.quit()
-                sys.exit()
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    points = [np.array([xdim/2.5,900])]
-                    state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0])       
-                if event.key == pygame.K_f:
-                    a = 4
-                if event.key == pygame.K_LEFT:
-                    a = 2
-                if event.key == pygame.K_RIGHT:
-                    a = 3
-                if event.key == pygame.K_SPACE:
-                    if pause:
-                        pause = False
-                    else:
-                        pause = True
-        if not pause:
-            state = transition(state,a)
-        for x in getvertex(position,angle):
-            if x[1] >= 900:
-                points = [np.array([xdim/2.5,900])]
-                state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0])
-        drawvector(velocity,np.array([xdim + 150,500]),(255,0,0))
-        drawvector(gravity,np.array([xdim + 150,500]),(255,0,0))
-        printpath(points,(150,150,150))
-        printpath(extrapolate(state,300),(254,2,25))
-        pygame.display.update()
-        clock.tick(60)
+     
+
+for n in range(1000):
+    print("trial number : " + str(n))
+    if n % 10 == 0 :
+        testrun(pilot)
+    state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
+    done = False
+    while not done:
+        action,prob,val = pilot.getaction(state)
+        nextstate = transition(state,action+1)
+        reward_ = reward(nextstate)
+        for x in getvertex(np.array([state[0],state[1]]),state[4]):
+            if x[1] >= 900 or x[1] <= 0 or x[0] >= xdim or x[0] <= 0:
+                done = True
+        pilot.storememory(state,action,prob,val,reward_,done)
+        state = nextstate
+    print("traning loop started")
+    pilot.train(10)
+
+
+
+    # while True :
+    # # for state in visual:
+    #     position = np.array([state[0],state[1]])
+    #     velocity = np.array([state[2],state[3]])
+    #     angle = state[4]
+    #     engineangle = state[7]
+    #     engine = state[6]
+    #     points.append(np.array([state[0],state[1]]))
+    #     a = 0
+    #     printstate(state)
+    #     for event in pygame.event.get():
+    #         if event.type == QUIT:
+    #             pygame.quit()
+    #             sys.exit()
+    #         if event.type == pygame.KEYDOWN:
+    #             if event.key == pygame.K_ESCAPE:
+    #                 points = [np.array([xdim/2.5,900])]
+    #                 state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0])       
+    #             if event.key == pygame.K_f:
+    #                 a = 4
+    #             if event.key == pygame.K_LEFT:
+    #                 a = 2
+    #             if event.key == pygame.K_RIGHT:
+    #                 a = 3
+    #             if event.key == pygame.K_SPACE:
+    #                 if pause:
+    #                     pause = False
+    #                 else:
+    #                     pause = True
+    #     if not pause:
+    #         state = transition(state,a)
+    #     for x in getvertex(position,angle):
+    #         if x[1] >= 900:
+    #             points = [np.array([xdim/2.5,900])]
+    #             state =  np.array([xdim/2.5,900.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0])
+    #     drawvector(velocity,np.array([xdim + 150,500]),(255,0,0))
+    #     drawvector(gravity,np.array([xdim + 150,500]),(255,0,0))
+    #     printpath(points,(150,150,150))
+    #     printpath(extrapolate(state,300),(254,2,25))
+    #     pygame.display.update()
+    #     clock.tick(60)
             
 
 

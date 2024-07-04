@@ -98,11 +98,11 @@ def reward(state):
     reward = -distance / 900  # Encourage getting closer to the target
     reward -= speed / 10  # Penalize high speeds
     reward += state[8] / 20  # Small bonus for conserving fuel
-    reward -= angleoffset
+    reward -= angleoffset * 3
     
     if is_terminal(state):
         if position[1] <= 110 and abs(position[0] - xdim/2) < 300:
-            reward += 100 -  5 * speed  # Big bonus for landing on the pad
+            reward += 150 -  8 * speed  # Big bonus for landing on the pad
         else:
             reward -= 100  # Big penalty for crashing
     

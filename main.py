@@ -472,7 +472,7 @@ restart()
 pilot = agent()
 
 n = 0    
-While True:
+while True:
     n += 1
     print("trial number : " + str(n))
     if n % 10 == 0 :

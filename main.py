@@ -82,7 +82,7 @@ action
 def is_terminal(state):
     terminal = False
     for x in getvertex(np.array([state[0],state[1]]),state[4]):
-        if x[1] >= 900 or x[1] <= 0 or x[0] >= xdim or x[0] <= 0:
+        if x[1] >= 890 or x[1] <= 0 or x[0] >= xdim or x[0] <= 0:
             terminal = True
     return terminal
 
@@ -105,8 +105,14 @@ def reward(state):
             reward -= 250
         if position[0] <= 0 or position[0] >= xdim:
             reward -= 250
-        if position[1] <= 110 and abs(position[0] - xdim/2) < 300:
-            reward += 250 -  8 * speed  # Big bonus for landing on the pad
+        if position[1] <= 70 and abs(position[0] - xdim/2) < 300:
+            reward += 250 -  8 * speed 
+            if angleoffset <= 0.5 and velocity[0] <= 50:
+                if velocity[0] <= 20:
+                    reward+= 500
+                if velocity[0] <= 10:
+                    reward += 1000
+                reward += 1000  - speed * 10 - angleoffset * 10# Big bonus for landing on the pad
         else:
             reward -= 225  # Big penalty for crashing
     
@@ -265,7 +271,7 @@ class agent:
         state = torch.tensor(np.array([inputstate]))
         distribution = self.policynet(state)
         if(show_probs):
-            print(distribution.probs)
+            return distribution.probs
         value = self.valuenet(state)
         action = distribution.sample()
 
@@ -423,6 +429,7 @@ def printpath (path,color = (55,60,50)):
 screen = pygame.display.set_mode((xdim,ydim))
 lasttime = time.time()
 backdrop = pygame.Rect(0,0,xdim + 400,ydim)
+backdrop2 = pygame.Rect(xdim,0,400,ydim)
 landingpad = pygame.Rect(xdim/2 - 100,ydim - groundheight,200,groundheight/2)
 ground = pygame.Rect(0,ydim - groundheight,xdim,groundheight)
 starttime = time.time()
@@ -466,7 +473,27 @@ def max_action_n_steps(state,n):
         a = action
     return a
 
-def printstate(state):
+def draw_centered_text(screen, text, center_pos,fontsize):
+    font = pygame.font.Font(None, fontsize)
+    text_surface = font.render(text, True, (255, 255, 255))
+    text_rect = text_surface.get_rect(center=center_pos)
+    screen.blit(text_surface, text_rect)
+
+
+def numtoactionlabel(n):
+    actions = ["None","Engine_Left","Engine_Right","Engine_Toggle"]
+    return actions[n]
+
+def numtocolorlabel(n):
+    colors = [
+        (255,0,0),
+        (0,255,0),
+        (0,0,255),
+        (100,150,100)
+    ]
+    return colors[n]
+
+def printstate(state,pilot,n):
    position = np.array([state[0],state[1]])
    velocity = np.array([state[2],state[3]])
    angle = state[4]
@@ -474,14 +501,31 @@ def printstate(state):
    engine = state[6]
    pygame.draw.rect(screen,(57,54,138),backdrop)
    pygame.draw.rect(screen,(204,102,0),ground)
+   printpath(extrapolate(state,300),(254,2,25))
+   pygame.draw.rect(screen,(0,0,0),backdrop2)
+   dist = pilot.getaction(state,show_probs = True)
+   dist = dist.detach().cpu().numpy()
+   dist = dist.flatten()
+   for x in range(len(dist)):
+    width = max(1, int(100 * dist[x]))
+    pygame.draw.rect(screen,numtocolorlabel(x),pygame.Rect(xdim + 50  + 300/4 * x , 800, 300/4, width ))
+    draw_centered_text(screen, numtoactionlabel(x), (xdim + 82.5 + x * 300/4, 790),15)
+
+   for x in range (5):
+     pygame.draw.circle(screen,(20,250,20),(xdim + 200, 500), (50 - 10 * x )+ 1)
+     pygame.draw.circle(screen, (0, 0, 0), (xdim + 200,500), 50 - 10 * x )
    pygame.draw.polygon(screen, (0,0,0),help(getvertex(position, angle)))
    pygame.draw.polygon(screen,(100,100,100),help(getflamevertex(position,angle,engineangle)))
-   pygame.draw.polygon(screen, (131,131,131),help(getvertex(np.array([xdim + 150,500]), angle)))
-   pygame.draw.polygon(screen,(77,77,77),help(getflamevertex(np.array([xdim + 150,500]),angle,engineangle)))
+   pygame.draw.polygon(screen, (131,131,131),help(getvertex(np.array([xdim + 200,500]), angle)))
+   pygame.draw.polygon(screen,(77,77,77),help(getflamevertex(np.array([xdim + 200,500]),angle,engineangle)))
+   draw_centered_text(screen,"fuel = " + str(state[8]),(xdim + 200, 300),30)
+   draw_centered_text(screen,"iterations : " + str(n),(xdim + 200, 200),30)
+
+
    pygame.draw.rect(screen,(90,77,77),landingpad)
    if engine == 1:
        pygame.draw.polygon(screen,(255,100,0),help(getfirevertex(position,angle,engineangle)))
-       pygame.draw.polygon(screen,(255,100,0),help(getfirevertex(np.array([xdim + 150,500]),angle,engineangle)))
+       pygame.draw.polygon(screen,(255,100,0),help(getfirevertex(np.array([xdim + 200,500]),angle,engineangle)))
 
 
 
@@ -489,7 +533,7 @@ clock = pygame.time.Clock()
 
 
 
-def testrun (pilot):
+def testrun (pilot,n):
     points = [np.array([xdim/2.5,700])]
     state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/4,np.pi/3)),0.0,0.0,np.pi/2,20.0]) 
     while True:
@@ -504,16 +548,15 @@ def testrun (pilot):
             engine = state[6]
             points.append(np.array([state[0],state[1]]))
             a = pilot.getaction(state)[0] + 1
-            printstate(state)
+            printstate(state,pilot,n)
             state = transition(state,a)
             for x in getvertex(position,angle):
                 if x[1] >= 900 or x[1] <= 0 or x[0] >= xdim or x[0] <= 0:
                     print("testrun was terminated")
                     return
-            drawvector(velocity,np.array([xdim + 150,500]),(255,0,0))
-            drawvector(gravity,np.array([xdim + 150,500]),(255,0,0))
+            drawvector(velocity,np.array([xdim + 200,500]),(255,0,0))
+            drawvector(gravity,np.array([xdim + 200,500]),(255,0,0))
             printpath(points,(255,255,255))
-            printpath(extrapolate(state,300),(254,2,25))
             pygame.display.update()
             clock.tick(60)
             
@@ -527,9 +570,9 @@ n = 0
 while True:
     print("trial number : " + str(n))
     state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/4,np.pi/3)),0.0,0.0,np.pi/2,20.0]) 
-    if n % 10 == 0 and n != 0 :
+    if n % 10 == 0:
         pilot.getaction(state,show_probs = True)
-        testrun(pilot)
+        testrun(pilot,n)
     n += 1
     done = False
     for _ in range (7):

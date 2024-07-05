@@ -158,46 +158,13 @@ def init_weights(m):
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
 
-class memory:
-    def __init__ (self):
-        self.length = 0
-        self.states = []
-        self.actions = []
-        self.probabilities = []
-        self.values = []
-        self.rewards = []
-        self.terminate = []
-    
-    def generatebatches(self):
-        startindexes = np.arange(0,self.length,10)
-        indexes = (np.arange(self.length,dtype=np.int64))
-        np.random.shuffle(indexes)
-        batches = [indexes[i:i + 10] for i in startindexes]
 
-        return np.array(self.states), np.array(self.actions),\
-               np.array(self.probabilities), np.array(self.values),\
-               np.array(self.rewards), np.array(self.terminate), batches 
-        
- 
-    def store (self,state,action,probability,value,reward,terminate):
-        self.length += 1
-        self.states.append(state)
-        self.actions.append(action)
-        self.probabilities.append(probability)
-        self.values.append(value)
-        self.rewards.append(reward)
-        self.terminate.append(terminate)
-    
-    def clear(self):
-        self.length = 0
-        self.states = []
-        self.actions = []
-        self.probabilities = []
-        self.values = []
-        self.rewards = []
-        self.terminate = []
-
-
+def flatten2d(arr):
+    out = []
+    for x in arr:
+        for y in x:
+            out.append(y)
+    return out
 
 class network(nn.Module):
     def __init__(self,layers,lrate,is_distribution = False):
@@ -231,6 +198,48 @@ class network(nn.Module):
         self.load_state_dict(torch.load(filepath))
 
 
+class memory:
+    def __init__ (self):
+        self.length = 0
+        self.states = []
+        self.actions = []
+        self.probabilities = []
+        self.values = []
+        self.rewards = []
+        self.trajectories = []
+    
+    def generatetrajectories(self):
+        return self.trajectories
+        
+    def store (self,state,action,probability,value,reward):
+        self.length += 1
+        self.states.append(state)
+        self.actions.append(action)
+        self.probabilities.append(probability)
+        self.values.append(value)
+        self.rewards.append(reward)
+    
+    def storetrajectory(self):
+        self.trajectories.append([
+             np.array(self.states),
+             np.array(self.actions),
+             np.array(self.probabilities),
+             np.array(self.values),
+             np.array(self.rewards)
+             ])
+        self.clear()
+    
+    def clear(self,clear_trajectories = False):
+        self.length = 0
+        self.states = []
+        self.actions = []
+        self.probabilities = []
+        self.values = []
+        self.rewards = []
+        if clear_trajectories:
+            self.trajectories = []
+
+
 class agent:
     def __init__ (self):
         self.policynet = network([9,128,128,4],0.0005,is_distribution = True)
@@ -238,8 +247,11 @@ class agent:
         self.policynet.apply(init_weights)
         self.memory = memory()
 
-    def storememory(self,state,action,probability,value,reward,terminate):
-        self.memory.store(state,action,probability,value,reward,terminate)
+    def storememory(self,state,action,probability,value,reward):
+        self.memory.store(state,action,probability,value,reward)
+    
+    def endtrajectory(self):
+        self.memory.storetrajectory()
 
     def saveparameters (self,policyfile,valuefile):
         self.policynet.saveparameters(policyfile)
@@ -262,37 +274,58 @@ class agent:
                torch.squeeze(value).item()
 
     def train(self,iterations,epsilon = 0.2,discount = 0.95):
-        states_,actions_,probs_,vals_,rewards_,terminate_,batches_ = self.memory.generatebatches()
-        advantages_ = np.zeros(len(states_))
-        rewards_to_go_ = np.zeros(len(states_))
+        data = self.memory.generatetrajectories()
+        states_ = [x[0] for x in data]
+        actions_ = [x[1] for x in data]
+        probs_ = [x[2] for x in data]
+        values_  = [x[3] for x in data]
+        rewards__ = [x[4] for x in data]
+        futurerewards = []
+        advantages = []
+        
 
-        # calculate rewards to go
-        for T in range (len(rewards_to_go_)):
-            discount_ = 1
-            R = 0
-            for t in range (T,len(rewards_to_go_)):
-                R += discount_ * rewards_[t]
-                discount_ = discount_ * discount
-            rewards_to_go_[T] = R
+        for i in range(len(rewards__)):
 
-        # calculate estimate for advantage functoin
-        for T in range (len(advantages_) - 1):
-            discount_ = 1
-            A = 0
-            for t in range(T,len(advantages_ ) - 1):
-                A+= discount_ * (rewards_[t] + discount * vals_[t+1] - vals_[t])
-                discount_ = discount_ * discount
-            advantages_[T] = A
+            rewards_ = rewards__[i]
+            vals_ = values_[i]
+            
+            # calculate reward esitmates
+            rewards_to_go_ = np.zeros(len(rewards_))  
+
+            for T in range (len(rewards_to_go_)):
+                discount_ = 1
+                R = 0
+                for t in range (T,len(rewards_to_go_)):
+                    R += discount_ * rewards_[t]
+                    discount_ = discount_ * discount
+                rewards_to_go_[T] = R
+
+            futurerewards.append(rewards_to_go_)
+
+            # calculate advantage estimates
+            advantages_ = np.zeros(len(rewards_))
+
+            for T in range (len(advantages_) - 1):
+                discount_ = 1
+                A = 0
+                for t in range(T,len(advantages_ ) - 1):
+                    A+= discount_ * (rewards_[t] + discount * vals_[t+1] - vals_[t])
+                    discount_ = discount_ * discount
+                advantages_[T] = A
+                
+            advantages.append(advantages_)
+            
 
         
-        states = torch.tensor(states_)
-        oldprobs = torch.tensor(probs_)
-        actions = torch.tensor(actions_)
-        rewards_to_go = torch.tensor(rewards_to_go_)
-        advantages = torch.tensor(advantages_)
+        states = torch.tensor(flatten2d(states_))
+        oldprobs = torch.tensor(flatten2d(probs_))
+        actions = torch.tensor(flatten2d(actions_))
+        rewards_to_go = torch.tensor(flatten2d(futurerewards))
+        advantages = torch.tensor(flatten2d(advantages))
 
 
         # training on policy
+        
         for _ in range (iterations):
             self.policynet.optimizer.zero_grad()
             distribution = self.policynet(states) 
@@ -307,10 +340,11 @@ class agent:
             self.valuenet.optimizer.zero_grad()
             networkvalues = self.valuenet(states)
             valueloss = ((networkvalues - rewards_to_go) **2).mean()
-            valueloss.backward()
+            weightedvalueloss = valueloss * 0.5
+            weightedvalueloss.backward()
             self.valuenet.optimizer.step()
         
-        self.memory.clear()
+        self.memory.clear(clear_trajectories = True)
 
 
 
@@ -457,7 +491,7 @@ clock = pygame.time.Clock()
 
 def testrun (pilot):
     points = [np.array([xdim/2.5,700])]
-    state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
+    state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/4,np.pi/3)),0.0,0.0,np.pi/2,20.0]) 
     while True:
             for event in pygame.event.get():
                 if event.type == QUIT:
@@ -492,22 +526,25 @@ pilot = agent()
 n = 0    
 while True:
     print("trial number : " + str(n))
-    state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
-    if n % 50 == 0 :
+    state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/4,np.pi/3)),0.0,0.0,np.pi/2,20.0]) 
+    if n % 10 == 0 and n != 0 :
         pilot.getaction(state,show_probs = True)
         testrun(pilot)
     n += 1
     done = False
-    while not done:
-        action,prob,val = pilot.getaction(state)
-        nextstate = transition(state,action+1)
-        reward_ = reward(nextstate)
-        for x in getvertex(np.array([state[0],state[1]]),state[4]):
-            if x[1] >= 900 or x[1] <= 0 or x[0] >= xdim or x[0] <= 0:
-                done = True
-                break
-        pilot.storememory(state,action,prob,val,reward_,done)
-        state = nextstate
+    for _ in range (7):
+        state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
+        while not done:
+            action,prob,val = pilot.getaction(state)
+            nextstate = transition(state,action+1)
+            reward_ = reward(nextstate)
+            for x in getvertex(np.array([state[0],state[1]]),state[4]):
+                if x[1] >= 900 or x[1] <= 0 or x[0] >= xdim or x[0] <= 0:
+                    done = True
+                    break
+            pilot.storememory(state,action,prob,val,reward_,)
+            state = nextstate
+        pilot.endtrajectory()
     pilot.train(10)
 
 

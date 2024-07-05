@@ -107,11 +107,13 @@ def reward(state):
             reward -= 250
         if position[1] <= 70 and abs(position[0] - xdim/2) < 300:
             reward += 250 -  8 * speed 
-            if angleoffset <= 0.5 and velocity[0] <= 50:
-                if velocity[0] <= 20:
+            if angleoffset <= 0.5 and abs(velocity[1]) <= 60:
+                if abs(velocity[1]) <= 50:
                     reward+= 500
-                if velocity[0] <= 10:
+                if abs(velocity[1]) <= 20:
                     reward += 1000
+                if velocity[1] <= 10:
+                    reward += 10000
                 reward += 1000  - speed * 10 - angleoffset * 10# Big bonus for landing on the pad
         else:
             reward -= 225  # Big penalty for crashing
@@ -128,6 +130,7 @@ def transition (state,action):
         engine = 0
     if action == 4:
                if engine == 1:
+                 if state[1] >= 200:
                    engine = 0
                else:
                    if fuel > 0:

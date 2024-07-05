@@ -82,7 +82,7 @@ action
 def is_terminal(state):
     terminal = False
     for x in getvertex(np.array([state[0],state[1]]),state[4]):
-        if x[1] >= 900:
+        if x[1] >= 900 or x[1] <= 0 or x[0] >= xdim or x[0] <= 0:
             terminal = True
     return terminal
 
@@ -101,10 +101,14 @@ def reward(state):
     reward -= angleoffset * 3
     
     if is_terminal(state):
+        if position[1] >= 500:
+            reward -= 250
+        if position[0] <= 0 or position[0] >= xdim:
+            reward -= 250
         if position[1] <= 110 and abs(position[0] - xdim/2) < 300:
-            reward += 150 -  8 * speed  # Big bonus for landing on the pad
+            reward += 250 -  8 * speed  # Big bonus for landing on the pad
         else:
-            reward -= 100  # Big penalty for crashing
+            reward -= 225  # Big penalty for crashing
     
     return reward
 
@@ -245,9 +249,11 @@ class agent:
         self.policynet.load(policyfile)
         self.valuenet.load(valuefile)
 
-    def getaction(self,inputstate):
+    def getaction(self,inputstate,show_probs = False):
         state = torch.tensor(np.array([inputstate]))
         distribution = self.policynet(state)
+        if(show_probs):
+            print(distribution.probs)
         value = self.valuenet(state)
         action = distribution.sample()
 
@@ -486,10 +492,11 @@ pilot = agent()
 n = 0    
 while True:
     print("trial number : " + str(n))
-    if n % 10 == 0 :
+    state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
+    if n % 50 == 0 :
+        pilot.getaction(state,show_probs = True)
         testrun(pilot)
     n += 1
-    state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
     done = False
     while not done:
         action,prob,val = pilot.getaction(state)

@@ -5,5 +5,11 @@ Rocket landing simulator using Proximal Policy Optimization
 
 
 
-https://github.com/aerioy/PPO-rocket-land/assets/93295441/56d80a39-159c-462a-96c2-8ecf93e3b375
+
+
+
+https://github.com/aerioy/PPO-rocket-land/assets/93295441/7c44b6c6-cdd3-4482-a078-6929fc6d1212
+
+
+
 

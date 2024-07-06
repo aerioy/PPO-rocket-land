@@ -87,39 +87,56 @@ def is_terminal(state):
     return terminal
 
 
+# def reward(state):
+#     position = np.array([state[0], state[1]])
+#     target = np.array([xdim/2, 100])
+#     distance = np.linalg.norm(position - target)
+#     velocity = np.array([state[2], state[3]])
+#     speed = np.linalg.norm(velocity)
+#     angleoffset = abs(np.pi/2 - state[4])**2
+#     reward = 0
+#     if is_terminal(state):
+#         if position[1] >= 500:
+#             reward -= 500
+#         if position[0] <= 0 or position[0] >= xdim:
+#             reward -= 500
+#         if position[1] <= 170 and abs(position[0] - xdim/2) < 300:
+#             reward += 100 * state[6]
+#             if angleoffset <= 0.5 and abs(velocity[1]) <= 60:
+#                 if abs(velocity[1]) <= 50:
+#                     reward+= 5000
+#                 if abs(velocity[1]) <= 20:
+#                     reward += 10000
+#                 if abs(velocity[1]) <= 10:
+#                     reward += 100000
+#                 reward += 1000  - speed * 10 - angleoffset * 10# Big bonus for landing on the pad
+#         else:
+#             reward -= 500 # Big penalty for crashing
+    
+#     return reward
+
 def reward(state):
     position = np.array([state[0], state[1]])
     target = np.array([xdim/2, 100])
     distance = np.linalg.norm(position - target)
     velocity = np.array([state[2], state[3]])
     speed = np.linalg.norm(velocity)
-    angleoffset = abs(np.pi/2 - state[4])**2
-    
-    reward = -distance / 900  # Encourage getting closer to the target
-    reward -= speed / 10  # Penalize high speeds
-    reward += state[8] / 20  # Small bonus for conserving fuel
-    reward -= angleoffset * 3
-    
-    
+    angleoffset = abs(np.pi/2 - state[4]) * 10
+    reward = 0
     if is_terminal(state):
         if position[1] >= 500:
             reward -= 500
         if position[0] <= 0 or position[0] >= xdim:
             reward -= 500
-        if position[1] <= 170 and abs(position[0] - xdim/2) < 300:
-            reward += 500 -  8 * speed 
-            if angleoffset <= 0.5 and abs(velocity[1]) <= 60:
-                if abs(velocity[1]) <= 50:
-                    reward+= 5000
-                if abs(velocity[1]) <= 20:
-                    reward += 10000
-                if abs(velocity[1]) <= 10:
-                    reward += 100000
-                reward += 10000  - speed * 10 - angleoffset * 10# Big bonus for landing on the pad
-        else:
-            reward -= 225  # Big penalty for crashing
+    reward -= distance / 900
+    reward -= angleoffset
+    reward -= speed
     
+    if abs(state[0] - xdim/2) <= 200 and state[1] <= 160 and abs(state[3]) <= 60 and abs(np.pi/2 - state[4]) <= 0.2:
+        reward = 100 + 0.1 * state[3]  - abs(np.pi/2 - state[4]) * 20 
     return reward
+
+
 
 # def reward(state):
 #     reward = 0
@@ -291,7 +308,7 @@ class agent:
                torch.squeeze(distribution.log_prob(action)).item(),\
                torch.squeeze(value).item()
 
-    def train(self,iterations,epsilon = 0.2,discount = 0.95):
+    def train(self,iterations,epsilon = 0.22,discount = 0.95):
         data = self.memory.generatetrajectories()
         states_ = [x[0] for x in data]
         actions_ = [x[1] for x in data]
@@ -589,11 +606,11 @@ engine_unlimited = True
 while True:
     print("trial number : " + str(n))
     state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/4,np.pi/3)),0.0,0.0,np.pi/2,20.0]) 
-    if n % 10 == 0:
+    if n % 50 == 0:
         pilot.getaction(state,show_probs = True)
         testrun(pilot,n,engine_unlimited)
-    if n == 300:
-        engine_unlimited = False
+    if n == 500:
+        engine_unlimited = True
     n += 1
     done = False
     for _ in range (7):

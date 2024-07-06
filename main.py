@@ -113,7 +113,7 @@ def reward(state):
                     reward+= 5000
                 if abs(velocity[1]) <= 20:
                     reward += 10000
-                if velocity[1] <= 10:
+                if abs(velocity[1]) <= 10:
                     reward += 100000
                 reward += 10000  - speed * 10 - angleoffset * 10# Big bonus for landing on the pad
         else:

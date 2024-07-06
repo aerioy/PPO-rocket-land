@@ -100,27 +100,34 @@ def reward(state):
     reward += state[8] / 20  # Small bonus for conserving fuel
     reward -= angleoffset * 3
     
+    
     if is_terminal(state):
         if position[1] >= 500:
-            reward -= 250
+            reward -= 500
         if position[0] <= 0 or position[0] >= xdim:
-            reward -= 250
-        if position[1] <= 70 and abs(position[0] - xdim/2) < 300:
-            reward += 250 -  8 * speed 
+            reward -= 500
+        if position[1] <= 170 and abs(position[0] - xdim/2) < 300:
+            reward += 500 -  8 * speed 
             if angleoffset <= 0.5 and abs(velocity[1]) <= 60:
                 if abs(velocity[1]) <= 50:
-                    reward+= 500
+                    reward+= 5000
                 if abs(velocity[1]) <= 20:
-                    reward += 1000
-                if velocity[1] <= 10:
                     reward += 10000
-                reward += 1000  - speed * 10 - angleoffset * 10# Big bonus for landing on the pad
+                if velocity[1] <= 10:
+                    reward += 100000
+                reward += 10000  - speed * 10 - angleoffset * 10# Big bonus for landing on the pad
         else:
             reward -= 225  # Big penalty for crashing
     
     return reward
 
-def transition (state,action):
+# def reward(state):
+#     reward = 0
+#     if state[1] <= 110 and state[3] <= 30:
+#         reward = 1 + state[8]
+#     return reward
+
+def transition (state,action,n = True):
     angle = state[4]
     engine = state[6]
     anglevelocity = state[5]
@@ -130,10 +137,11 @@ def transition (state,action):
         engine = 0
     if action == 4:
                if engine == 1:
+                if  n:
                  if state[1] >= 350:
                    engine = 0
                else:
-                   if fuel > 0:
+                  if fuel > 0:
                     engine = 1
     if action == 2:
         if engineangle - np.pi/12 >= np.pi/4 and engineangle - np.pi/12 <= 3 *np.pi / 4:
@@ -255,6 +263,7 @@ class agent:
         self.valuenet = network([9,128,128,1],0.0005,)
         self.policynet.apply(init_weights)
         self.memory = memory()
+        self.record = float("-inf")
 
     def storememory(self,state,action,probability,value,reward):
         self.memory.store(state,action,probability,value,reward)
@@ -289,6 +298,11 @@ class agent:
         probs_ = [x[2] for x in data]
         values_  = [x[3] for x in data]
         rewards__ = [x[4] for x in data]
+        totalrewards = np.sum(flatten2d(rewards__))
+        if totalrewards > self.record:
+            self.record = totalrewards
+            print("record rewards acheived")
+            self.saveparameters("recordpolicy.pth","recordvalue.pth")
         futurerewards = []
         advantages = []
         
@@ -513,6 +527,7 @@ def printstate(state,pilot,n):
     width = max(1, int(100 * dist[x]))
     pygame.draw.rect(screen,numtocolorlabel(x),pygame.Rect(xdim + 50  + 300/4 * x , 800, 300/4, width ))
     draw_centered_text(screen, numtoactionlabel(x), (xdim + 82.5 + x * 300/4, 790),15)
+    draw_centered_text(screen,"current best : " + str(pilot.record), (xdim + 200,100),30)
 
    for x in range (5):
      pygame.draw.circle(screen,(20,250,20),(xdim + 200, 500), (50 - 10 * x )+ 1)
@@ -536,7 +551,7 @@ clock = pygame.time.Clock()
 
 
 
-def testrun (pilot,n):
+def testrun (pilot,n,unlimited = True):
     points = [np.array([xdim/2.5,700])]
     state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/4,np.pi/3)),0.0,0.0,np.pi/2,20.0]) 
     while True:
@@ -552,7 +567,7 @@ def testrun (pilot,n):
             points.append(np.array([state[0],state[1]]))
             a = pilot.getaction(state)[0] + 1
             printstate(state,pilot,n)
-            state = transition(state,a)
+            state = transition(state,a, unlimited)
             for x in getvertex(position,angle):
                 if x[1] >= 900 or x[1] <= 0 or x[0] >= xdim or x[0] <= 0:
                     print("testrun was terminated")
@@ -570,19 +585,22 @@ restart()
 pilot = agent()
 
 n = 0    
+engine_unlimited = True
 while True:
     print("trial number : " + str(n))
     state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/4,np.pi/3)),0.0,0.0,np.pi/2,20.0]) 
     if n % 10 == 0:
         pilot.getaction(state,show_probs = True)
-        testrun(pilot,n)
+        testrun(pilot,n,engine_unlimited)
+    if n == 300:
+        engine_unlimited = False
     n += 1
     done = False
     for _ in range (7):
         state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/3,np.pi/2)),0.0,0.0,np.pi/2,20.0]) 
         while not done:
             action,prob,val = pilot.getaction(state)
-            nextstate = transition(state,action+1)
+            nextstate = transition(state,action+1,n = engine_unlimited)
             reward_ = reward(nextstate)
             for x in getvertex(np.array([state[0],state[1]]),state[4]):
                 if x[1] >= 900 or x[1] <= 0 or x[0] >= xdim or x[0] <= 0:

@@ -121,19 +121,22 @@ def reward(state):
     distance = np.linalg.norm(position - target)
     velocity = np.array([state[2], state[3]])
     speed = np.linalg.norm(velocity)
-    angleoffset = abs(np.pi/2 - state[4]) * 10
+    angleoffset = abs(np.pi/2 - state[4]) * 4
     reward = 0
+
+    if position[1] >= 600:
+        reward -= 0.1
     if is_terminal(state):
         if position[1] >= 500:
             reward -= 500
         if position[0] <= 0 or position[0] >= xdim:
             reward -= 500
-    reward -= distance / 900
-    reward -= angleoffset
-    reward -= speed
+    reward -= distance / 800
+    reward -= (angleoffset) ** 2 
+    reward -= speed / 10
     
     if abs(state[0] - xdim/2) <= 200 and state[1] <= 160 and abs(state[3]) <= 60 and abs(np.pi/2 - state[4]) <= 0.2:
-        reward = 100 + 0.1 * state[3]  - abs(np.pi/2 - state[4]) * 20 
+        reward  = 100 +  state[3]  - abs(np.pi/2 - state[4]) * 150 
     return reward
 
 
@@ -293,8 +296,8 @@ class agent:
         self.valuenet.saveparameters(valuefile)
     
     def loadparameters(self,policyfile,valuefile):
-        self.policynet.load(policyfile)
-        self.valuenet.load(valuefile)
+        self.policynet.loadparameters(policyfile)
+        self.valuenet.loadparameters(valuefile)
 
     def getaction(self,inputstate,show_probs = False):
         state = torch.tensor(np.array([inputstate]))
@@ -600,17 +603,15 @@ def testrun (pilot,n,unlimited = True):
 restart()
 
 pilot = agent()
-
+pilot.loadparameters("recordpolicy.pth","recordvalue.pth")
 n = 0    
-engine_unlimited = True
+engine_unlimited = False
 while True:
     print("trial number : " + str(n))
     state =  np.array([xdim/2.5,700.0,0.0,0.0, np.float64(randrange(np.pi/4,np.pi/3)),0.0,0.0,np.pi/2,20.0]) 
     if n % 50 == 0:
         pilot.getaction(state,show_probs = True)
         testrun(pilot,n,engine_unlimited)
-    if n == 500:
-        engine_unlimited = True
     n += 1
     done = False
     for _ in range (7):

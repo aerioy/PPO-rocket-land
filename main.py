@@ -130,7 +130,7 @@ def transition (state,action):
         engine = 0
     if action == 4:
                if engine == 1:
-                 if state[1] >= 200:
+                 if state[1] >= 350:
                    engine = 0
                else:
                    if fuel > 0:
